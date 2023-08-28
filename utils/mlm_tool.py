@@ -1,0 +1,114 @@
+import torch
+import math
+from random import randint, shuffle
+from random import random as rand
+
+
+class TextMaskingGenerator:
+    def __init__(self, tokenizer, mask_prob, mask_max, skipgram_prb=0.2, skipgram_size=3, mask_whole_word=True,
+                 use_roberta=False):
+        self.id2token = {i: w for w, i in tokenizer.get_vocab().items()}
+        self.use_roberta = use_roberta
+        for i in range(len(self.id2token)):
+            assert i in self.id2token.keys()  # check
+        self.cls_token_id = tokenizer.cls_token_id
+        self.mask_token_id = tokenizer.mask_token_id
+        self.mask_max = mask_max
+        self.mask_prob = mask_prob
+        self.skipgram_prb = skipgram_prb
+        self.skipgram_size = skipgram_size
+        self.mask_whole_word = mask_whole_word
+
+        # print("len(tokenizer.id2token): ", len(self.id2token), "  ----  cls_token_id: ", self.cls_token_id,
+        #       "  ----  mask_token_id: ", self.mask_token_id, flush=True)
+
+    def get_random_word(self):
+        i = randint(0, len(self.id2token) - 1)
+        return i  # self.id2token[i]
+
+    def __call__(self, text_ids):  # tokens: [CLS] + ...
+        n_pred = min(self.mask_max, max(1, int(round(len(text_ids) * self.mask_prob))))
+
+        # candidate positions of masked tokens
+        assert text_ids[0] == self.cls_token_id
+        special_pos = set([0])  # will not be masked
+        cand_pos = list(range(1, len(text_ids)))
+
+        shuffle(cand_pos)
+        masked_pos = set()
+        max_cand_pos = max(cand_pos)
+        for pos in cand_pos:
+            if len(masked_pos) >= n_pred:
+                break
+            if pos in masked_pos:
+                continue
+
+            def _expand_whole_word(st, end):
+                new_st, new_end = st, end
+
+                if self.use_roberta:
+                    while (new_st > 1) and (self.id2token[text_ids[new_st].item()][0] != 'Ġ'):
+                        new_st -= 1
+                    while (new_end < len(text_ids)) and (self.id2token[text_ids[new_end].item()][0] != 'Ġ'):
+                        new_end += 1
+                else:
+                    # bert, WordPiece
+                    while (new_st >= 0) and self.id2token[text_ids[new_st].item()].startswith('##'):
+                        new_st -= 1
+                    while (new_end < len(text_ids)) and self.id2token[text_ids[new_end].item()].startswith('##'):
+                        new_end += 1
+
+                return new_st, new_end
+
+            if (self.skipgram_prb > 0) and (self.skipgram_size >= 2) and (rand() < self.skipgram_prb):
+                # ngram
+                cur_skipgram_size = randint(2, self.skipgram_size)
+                if self.mask_whole_word:
+                    st_pos, end_pos = _expand_whole_word(
+                        pos, pos + cur_skipgram_size)
+                else:
+                    st_pos, end_pos = pos, pos + cur_skipgram_size
+            else:
+                if self.mask_whole_word:
+                    st_pos, end_pos = _expand_whole_word(pos, pos + 1)
+                else:
+                    st_pos, end_pos = pos, pos + 1
+
+            for mp in range(st_pos, end_pos):
+                if (0 < mp <= max_cand_pos) and (mp not in special_pos):
+                    masked_pos.add(mp)
+                else:
+                    break
+
+        masked_pos = list(masked_pos)
+        n_real_pred = len(masked_pos)
+        if n_real_pred > n_pred:
+            shuffle(masked_pos)
+            masked_pos = masked_pos[:n_pred]
+
+        for pos in masked_pos:
+            if rand() < 0.8:  # 80%
+                text_ids[pos] = self.mask_token_id
+            elif rand() < 0.5:  # 10%
+                text_ids[pos] = self.get_random_word()
+
+        return text_ids, masked_pos
+    
+def mlm(text, text_input, tokenizer, device, mask_generator, config):
+
+    text_masked = tokenizer(text, padding='max_length', truncation=True, max_length=config['max_tokens'],
+                                return_tensors="pt").to(device)
+    text_ids_masked = text_masked.input_ids
+    masked_pos = torch.empty((text_ids_masked.shape[0], config['max_masks']), dtype=torch.int64, device=device)
+    masked_ids = torch.empty((text_ids_masked.shape[0], config['max_masks']), dtype=torch.long, device=device)
+    for index, text_id in enumerate(text_ids_masked):
+        text_ids_masked_, masked_pos_ = mask_generator(text_id)
+        masked_ids_ = [text_input.input_ids[index][p].item() for p in masked_pos_]
+        n_pad = config['max_masks'] - len(masked_ids_)
+        masked_pos_ = masked_pos_ + [0] * n_pad
+        masked_pos_ = torch.tensor(masked_pos_, dtype=torch.int64).to(device)
+        masked_ids_ = masked_ids_ + [-100] * n_pad
+        masked_ids_ = torch.tensor(masked_ids_, dtype=torch.long).to(device)
+        masked_pos[index] = masked_pos_
+        masked_ids[index] = masked_ids_
+    return text_ids_masked, masked_pos, masked_ids
