@@ -57,6 +57,17 @@ eval_epoch: 3  # epoch index
 
 
 # cross augmentation
-use_cross_aug: True
+
+# # fm_batch
+# use_cross_aug: False
+# cross_prob: 0.7
+# cross_gene: 0.01
+# cross_kernel_size: 3
+# cross_max_features: 2
+
+# fm inverse sample
+use_cross_aug: False
 cross_prob: 0.5
-cross_gene: 0.01
+cross_gene: 0.0
+cross_kernel_size: 0.0
+cross_max_features: 0.0

@@ -212,7 +212,7 @@ class XVLMForRetrieval(XVLMBase):
             loss_itc = self.get_contrastive_loss(image_feat_1, text_feat_1, idx=idx)
 
 
-        loss_itm = self.get_matching_loss(image_embeds_1, image_atts_1, image_feat_1, text_embeds_1, text1_atts, text_feat_1, idx=idx)
+        loss_itm = self.get_matching_loss_ga_aug(image_embeds_1, image_atts_1, image_feat_1, text_embeds_1, text1_atts, text_feat_1, idx=idx)
         #loss_itm_2 = self.get_matching_loss(image_embeds_2, image_atts_2, image_feat_2, text_embeds_1, text1_atts, text_feat_1, idx=idx)
         #loss_itm = (loss_itm_1 + loss_itm_2) / 2
         if mlm_inputs is not None:
@@ -252,6 +252,103 @@ class XVLMForRetrieval(XVLMBase):
 
         return population
     
+    def get_matching_loss_ga_aug(self, image_embeds, image_atts, image_feat, text_embeds, text_atts, text_feat, idx=None):
+        """
+        Matching Loss with hard negatives
+        
+        """
+        image_neg_idx, text_neg_idx = self.get_hard_negatives(image_feat, text_feat, idx=idx)
+
+        bs = image_feat.size(0)
+        image_embeds_neg = []
+        image_atts_neg = []
+        for b in range(bs):
+            neg_idx = image_neg_idx[b]
+            image_embeds_neg.append(image_embeds[neg_idx])
+            image_atts_neg.append(image_atts[neg_idx])
+
+        image_embeds_neg = torch.stack(image_embeds_neg, dim=0)
+        image_atts_neg = torch.stack(image_atts_neg, dim=0)
+
+        text_embeds_neg = []
+        text_atts_neg = []
+        for b in range(bs):
+            neg_idx = text_neg_idx[b]
+            text_embeds_neg.append(text_embeds[neg_idx])
+            text_atts_neg.append(text_atts[neg_idx])
+
+        text_embeds_neg = torch.stack(text_embeds_neg, dim=0)
+        text_atts_neg = torch.stack(text_atts_neg, dim=0)
+
+        text_embeds_all = torch.cat([text_embeds, text_embeds_neg], dim=0)
+        text_atts_all = torch.cat([text_atts, text_atts_neg], dim=0)
+        image_embeds_all = torch.cat([image_embeds_neg, image_embeds], dim=0)
+        image_atts_all = torch.cat([image_atts_neg, image_atts], dim=0)
+
+        # Before Cross
+        # print(f"Before Cross Embeds: {image_embeds.shape=}")
+        # print(f"Before Cross Embeds: {text_embeds.shape=}")
+        # print(f"Before Cross Embeds: {image_atts.shape=}")
+        # print(f"Before Cross Embeds: {text_atts.shape=}")
+
+        image_embeds = self.crossover_fm_batch(image_embeds)
+        text_embeds = self.crossover_fm_batch(text_embeds)
+
+        # image_embeds = self.mutate_fm_inv_sample(image_embeds)
+        # text_embeds = self.mutate_fm_inv_sample(text_embeds)
+        # print(f"Before Cross Embeds: {image_embeds.shape=}")
+        # print(f"Before Cross Embeds: {text_embeds.shape=}")
+        # print(f"Before Cross Embeds: {image_atts.shape=}")
+        # print(f"Before Cross Embeds: {text_atts.shape=}")
+
+        cross_pos = self.get_cross_embeds(image_embeds, image_atts, text_embeds=text_embeds, text_atts=text_atts)[:, 0, :]
+        cross_neg = self.get_cross_embeds(image_embeds_all, image_atts_all, text_embeds=text_embeds_all,
+                                          text_atts=text_atts_all)[:, 0, :]
+        # After Cross
+        # print(f"After Cross Embeds: {cross_pos.shape=}")
+        # print(f"After Cross Embeds: {cross_neg.shape=}")
+        # exit()
+        output = self.itm_head(torch.cat([cross_pos, cross_neg], dim=0))
+        itm_labels = torch.cat([torch.ones(bs, dtype=torch.long),
+                                torch.zeros(2 * bs, dtype=torch.long)], dim=0).to(image_embeds.device)
+
+        return F.cross_entropy(output, itm_labels)
+    
+    def get_kernel_indices(self, h, w, indices, kernel_size):
+        half = kernel_size//2
+        new_indices = []
+        for ind in indices:
+            row1 = max(ind[0]-half, 0)
+            col1 = max(ind[1]-half, 0)
+
+            row2 = min(ind[0]+half, h-1)
+            col2 = min(ind[1]+half, w-1)
+            # print(f"{row1=}, {row2=}, {col1=}, {col2=}")
+            new_indices.extend(torch.dstack(torch.meshgrid(torch.arange(row1, row2+1), torch.arange(col1, col2+1), indexing="ij")))
+        return torch.unique(torch.concat(new_indices), dim=0)
+
+    def crossover_fm_batch(self, x):
+    
+        batch_size, h, w = x.size()
+        p_surface = torch.rand((w,h))
+        indices = torch.nonzero(p_surface < self.config["cross_prob"])
+        indices = indices[:min(self.config["cross_max_features"], indices.shape[0]), :]
+        
+        indices_coor = self.get_kernel_indices(h, w, indices, self.config["cross_kernel_size"])
+        
+        xx = x.clone()
+        xx[:,indices_coor[:, 0], indices_coor[:, 1]] = x[torch.randperm(batch_size)][:,indices_coor[:, 0], indices_coor[:, 1]] 
+        return xx
+    
+    def mutate_fm_inv_sample(self, x):
+        batch_size, h, w = x.size()
+        p = torch.rand(batch_size)
+        indices = torch.arange(batch_size)[p < self.config["cross_prob"]]
+
+        xx = x.clone()
+        xx[indices] = torch.flip(x[indices], dims=[2])
+        return xx
+
     @torch.no_grad()
     def copy_params(self):
         for model_pair in self.model_pairs:
