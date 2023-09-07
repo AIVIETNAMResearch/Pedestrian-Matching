@@ -286,13 +286,15 @@ class XVLMForRetrieval(XVLMBase):
         image_atts_all = torch.cat([image_atts_neg, image_atts], dim=0)
 
         # Before Cross
-        # print(f"Before Cross Embeds: {image_embeds.shape=}")
-        # print(f"Before Cross Embeds: {text_embeds.shape=}")
-        # print(f"Before Cross Embeds: {image_atts.shape=}")
-        # print(f"Before Cross Embeds: {text_atts.shape=}")
+        # print(f"Before Cross Embeds: {image_embeds.shape=}") # 577x768
+        # print(f"Before Cross Embeds: {text_embeds.shape=}") # 40x768
+        # print(f"Before Cross Embeds: {image_atts.shape=}") # 577
+        # print(f"Before Cross Embeds: {text_atts.shape=}") # 40
+        
+        # image_embeds = self.crossover_fm_batch(image_embeds)
+        # text_embeds = self.crossover_fm_batch(text_embeds)
 
-        image_embeds = self.crossover_fm_batch(image_embeds)
-        text_embeds = self.crossover_fm_batch(text_embeds)
+        image_embeds, text_embeds = self.crossover_fm_batch_im_text(image_embeds, text_embeds)
 
         # image_embeds = self.mutate_fm_inv_sample(image_embeds)
         # text_embeds = self.mutate_fm_inv_sample(text_embeds)
@@ -327,7 +329,7 @@ class XVLMForRetrieval(XVLMBase):
             new_indices.extend(torch.dstack(torch.meshgrid(torch.arange(row1, row2+1), torch.arange(col1, col2+1), indexing="ij")))
         return torch.unique(torch.concat(new_indices), dim=0)
 
-    def crossover_fm_batch(self, x):
+    def crossover_fm_batch(self, x, batch_indices=None):
     
         batch_size, h, w = x.size()
         p_surface = torch.rand((w,h))
@@ -337,8 +339,20 @@ class XVLMForRetrieval(XVLMBase):
         indices_coor = self.get_kernel_indices(h, w, indices, self.config["cross_kernel_size"])
         
         xx = x.clone()
-        xx[:,indices_coor[:, 0], indices_coor[:, 1]] = x[torch.randperm(batch_size)][:,indices_coor[:, 0], indices_coor[:, 1]] 
+        if indices is None:
+            xx[:,indices_coor[:, 0], indices_coor[:, 1]] = x[torch.randperm(batch_size)][:,indices_coor[:, 0], indices_coor[:, 1]] 
+        else:
+            xx[:,indices_coor[:, 0], indices_coor[:, 1]] = x[batch_indices][:,indices_coor[:, 0], indices_coor[:, 1]] 
         return xx
+    
+    def crossover_fm_batch_im_text(self, image_embeds, text_embeds):
+    
+        batch_size = image_embeds.size()[0]
+        indices = torch.randperm(batch_size)
+        image_embeds = self.crossover_fm_batch(image_embeds, indices)
+        text_embeds = self.crossover_fm_batch(text_embeds, indices)
+
+        return image_embeds, text_embeds
     
     def mutate_fm_inv_sample(self, x):
         batch_size, h, w = x.size()
