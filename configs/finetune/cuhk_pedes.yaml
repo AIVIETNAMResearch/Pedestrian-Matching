@@ -52,7 +52,7 @@ erasing_p: 0.6
 
 ## Other Settings
 optimizer: {opt: adamW, lr: 1e-5, weight_decay: 0.01, lr_mult: 2, vision_lr: 1e-5, text_lr: 1e-5}
-schedular: {sched: cosine, epochs: 61, num_warmup_steps: 0.025}
+schedular: {sched: cosine, epochs: 61, num_warmup_steps: 0.1}
 eval_epoch: 3  # epoch index
 
 # fm inverse sample
@@ -66,5 +66,5 @@ eval_epoch: 3  # epoch index
 use_cross_aug: False
 cross_prob: 0.7
 cross_gene: 0.01
-cross_kernel_size: 3
+cross_kernel_size: 29
 cross_max_features: 2

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.xvlm import XVLMBase, XVLMPlusBase
 import random
+import numpy as np 
 
 class SANNetwork(nn.Module):
     def __init__(self, input_size, num_heads=2, device="cuda"):
@@ -46,6 +47,17 @@ class SANNetwork(nn.Module):
     def get_softmax_hadamand_layer(self):
         return self.get_mean_attention_weights()
 
+# HA 16 Sep 2023
+class Get_Scalar:
+    def __init__(self, value):
+        self.value = value
+
+    def get_value(self, iter):
+        return self.value
+
+    def __call__(self, iter):
+        return self.value
+    
 class XVLMForRetrieval(XVLMBase):
     def __init__(self, config):
         super().__init__(config, load_vision_params=False, load_text_params=False,
@@ -76,7 +88,14 @@ class XVLMForRetrieval(XVLMBase):
 
         self.num_attention_heads = self.text_encoder.config.num_attention_heads
         self.init_params = []
-        
+        # HA 16 Sept 2023
+        # parameter for Beta distribution of Mix Up
+        self.alpha = 0.5
+        # temperature params function
+        self.t_fn = Get_Scalar(0.5)  
+        # initial iteration count
+        self.it = 0
+
         if config['use_id_loss']:
             self.classifier = nn.Linear(config['embed_dim'], config['num_classes'])
         if config['use_sdm']:
@@ -173,6 +192,8 @@ class XVLMForRetrieval(XVLMBase):
 
         text_embeds_1 = self.get_text_embeds(text2_ids, text2_atts)
         
+        # image_embeds_1, text_embeds_1, indices = self.crossover_fm_batch_im_text(image_embeds_1, text_embeds_1)
+
         image_feat_1, text_feat_1 = self.get_features(image_embeds_1, text_embeds_1)
         if self.config['use_cross_aug']:
             image_feat_1 = self.cross_aug_san(image_feat_1, num_genes=self.cross_gene)
@@ -184,7 +205,10 @@ class XVLMForRetrieval(XVLMBase):
 
                 self.temp.clamp_(0.001, 0.5)
                 image_embeds_2, image_atts_2 = self.get_vision_embeds_m(image1)
+                image_embeds_2 = self.crossover_fm_batch(image_embeds_2)
                 text_embeds_2 = self.get_text_embeds_m(text1_ids, text1_atts)
+                # image_embeds_2, text_embeds_2, indices = self.crossover_fm_batch_im_text(image_embeds_2, text_embeds_2, indices)
+                # image_embeds_2.shape =  b, 577, 768
                 image_feat_2, text_feat_2 = self.get_features_m(image_embeds_2, text_embeds_2)
                 
                 if self.config['use_cross_aug']:
@@ -212,7 +236,8 @@ class XVLMForRetrieval(XVLMBase):
             loss_itc = self.get_contrastive_loss(image_feat_1, text_feat_1, idx=idx)
 
 
-        loss_itm = self.get_matching_loss_ga_aug(image_embeds_1, image_atts_1, image_feat_1, text_embeds_1, text1_atts, text_feat_1, idx=idx)
+        loss_itm = self.get_matching_loss(image_embeds_1, image_atts_1, image_feat_1, text_embeds_1, text1_atts, text_feat_1, idx=idx)
+        # loss_itm = self.get_matching_loss_ga_aug(image_embeds_1, image_atts_1, image_feat_1, text_embeds_1, text1_atts, text_feat_1, idx=idx)
         #loss_itm_2 = self.get_matching_loss(image_embeds_2, image_atts_2, image_feat_2, text_embeds_1, text1_atts, text_feat_1, idx=idx)
         #loss_itm = (loss_itm_1 + loss_itm_2) / 2
         if mlm_inputs is not None:
@@ -251,6 +276,20 @@ class XVLMForRetrieval(XVLMBase):
                     population[index] = individual
 
         return population
+    # HA 16 Sep 2023
+    def mixup_one_target(self, x1, x2, alpha=1.0, is_bias=False):
+        """Returns mixed inputs, mixed targets, and lambda
+        """
+        if alpha > 0:
+            lam = np.random.beta(alpha, alpha)
+        else:
+            lam = 1
+        if is_bias:
+            lam = max(lam, 1 - lam)
+
+        mixed_x = lam * x1 + (1 - lam) * x2
+        
+        return mixed_x
     
     def get_matching_loss_ga_aug(self, image_embeds, image_atts, image_feat, text_embeds, text_atts, text_feat, idx=None):
         """
@@ -293,8 +332,41 @@ class XVLMForRetrieval(XVLMBase):
         
         # image_embeds = self.crossover_fm_batch(image_embeds)
         # text_embeds = self.crossover_fm_batch(text_embeds)
-
+        # print(image_embeds.shape, text_embeds.shape )
+        # torch.Size([16, 577, 768]) torch.Size([16, 40, 768])
         image_embeds, text_embeds = self.crossover_fm_batch_im_text(image_embeds, text_embeds)
+        # HA 19 Sep 2023
+        k_cross = 5 
+        last_image_embeds = []
+        last_text_embeds = []
+        for index in range(k_cross):
+            image_embeds, text_embeds = self.crossover_fm_batch_im_text(image_embeds, text_embeds)
+            if index == 0:
+                last_image_embeds = image_embeds
+                last_text_embeds = text_embeds
+            else:
+                last_image_embeds += image_embeds
+                last_text_embeds += text_embeds
+                
+        last_image_embeds /= k_cross
+        last_text_embeds /= k_cross
+
+        # Temperature sharpening
+        T = self.t_fn(self.it)
+        # avg
+        avg_image_prob = torch.softmax(last_image_embeds, dim=1)
+        avg_image_prob = (avg_image_prob / avg_image_prob.sum(dim=-1, keepdim=True))
+        avg_text_prob = torch.softmax(last_text_embeds, dim=1)
+        avg_text_prob = (avg_text_prob / avg_text_prob.sum(dim=-1, keepdim=True))
+        # sharpening
+        cross_image_embeds = avg_image_prob ** (1 / T)
+        cross_image_embeds = (cross_image_embeds / cross_image_embeds.sum(dim=-1, keepdim=True)).detach()
+        cross_text_embeds = avg_text_prob ** (1 / T)
+        cross_text_embeds = (cross_text_embeds / cross_text_embeds.sum(dim=-1, keepdim=True)).detach()
+                        
+        # Mix up
+        image_embeds = self.mixup_one_target(image_embeds, cross_image_embeds, self.alpha, is_bias=True)
+        text_embeds = self.mixup_one_target(text_embeds, cross_text_embeds, self.alpha, is_bias=True)
 
         # image_embeds = self.mutate_fm_inv_sample(image_embeds)
         # text_embeds = self.mutate_fm_inv_sample(text_embeds)
@@ -336,7 +408,65 @@ class XVLMForRetrieval(XVLMBase):
         indices = torch.nonzero(p_surface < self.config["cross_prob"])
         indices = indices[:min(self.config["cross_max_features"], indices.shape[0]), :]
         
-        indices_coor = self.get_kernel_indices(h, w, indices, self.config["cross_kernel_size"])
+        indices_coor = self.get_kernel_indices_wh(h, w, indices, self.config["cross_kernel_size"])
+        
+        xx = x.clone()
+        if batch_indices is None:
+            xx[:,indices_coor[:, 0], indices_coor[:, 1]] = x[torch.randperm(batch_size)][:,indices_coor[:, 0], indices_coor[:, 1]] 
+        else:
+            xx[:,indices_coor[:, 0], indices_coor[:, 1]] = x[batch_indices][:,indices_coor[:, 0], indices_coor[:, 1]] 
+        return xx
+    
+    def crossover_fm_batch_im_text(self, image_embeds, text_embeds, indices = None):
+        
+        if indices is None:
+            batch_size = image_embeds.size()[0]
+            indices = torch.randperm(batch_size)
+        image_embeds = self.crossover_fm_batch(image_embeds, indices)
+        text_embeds = self.crossover_fm_batch(text_embeds, indices)
+
+        return image_embeds, text_embeds, indices
+
+
+    def get_kernel_indices_wh(self, h, w, indices, kernel_size):
+        half_row = kernel_size//2
+        half_col = (kernel_size+48)//2
+        new_indices = []
+        for ind in indices:
+            row1 = max(ind[0]-half_row, 0)
+            col1 = max(ind[1]-half_col, 0)
+
+            row2 = min(ind[0]+half_row, h-1)
+            col2 = min(ind[1]+half_col, w-1)
+            # print(f"{row1=}, {row2=}, {col1=}, {col2=}")
+            new_indices.extend(torch.dstack(torch.meshgrid(torch.arange(row1, row2+1), torch.arange(col1, col2+1), indexing="ij")))
+        return torch.unique(torch.concat(new_indices), dim=0)
+
+    
+    
+    def get_kernel_indices_wh_im_text(self, h, w, indices, half_row, half_col):
+        # half_row = kernel_size//2
+        # half_col = (kernel_size+20)//2
+        new_indices = []
+        for ind in indices:
+            row1 = max(ind[0]-half_row, 0)
+            col1 = max(ind[1]-half_col, 0)
+
+            row2 = min(ind[0]+half_row, h-1)
+            col2 = min(ind[1]+half_col, w-1)
+            # print(f"{row1=}, {row2=}, {col1=}, {col2=}")
+            new_indices.extend(torch.dstack(torch.meshgrid(torch.arange(row1, row2+1), torch.arange(col1, col2+1), indexing="ij")))
+        return torch.unique(torch.concat(new_indices), dim=0)
+    
+
+    def crossover_fm_batch_im_text_single(self, x, half_row, half_col, batch_indices=None):
+    
+        batch_size, h, w = x.size()
+        p_surface = torch.rand((w,h))
+        indices = torch.nonzero(p_surface < self.config["cross_prob"])
+        indices = indices[:min(self.config["cross_max_features"], indices.shape[0]), :]
+        
+        indices_coor = self.get_kernel_indices_wh_im_text(h, w, indices, half_row, half_col)
         
         xx = x.clone()
         if indices is None:
@@ -345,12 +475,17 @@ class XVLMForRetrieval(XVLMBase):
             xx[:,indices_coor[:, 0], indices_coor[:, 1]] = x[batch_indices][:,indices_coor[:, 0], indices_coor[:, 1]] 
         return xx
     
-    def crossover_fm_batch_im_text(self, image_embeds, text_embeds):
+    def crossover_fm_batch_im_text_difhw(self, image_embeds, text_embeds):
     
         batch_size = image_embeds.size()[0]
-        indices = torch.randperm(batch_size)
-        image_embeds = self.crossover_fm_batch(image_embeds, indices)
-        text_embeds = self.crossover_fm_batch(text_embeds, indices)
+        batch_indices = torch.randperm(batch_size)
+        im_cross_kernel_size = self.config["cross_kernel_size"]
+        # 577x768, 40x768
+        text_cross_kernel_size = int(im_cross_kernel_size / 14.25)
+
+        image_embeds = self.crossover_fm_batch_im_text_single(image_embeds, half_row=im_cross_kernel_size//2, 
+                                                              half_col=77, batch_indices=batch_indices)
+        text_embeds = self.crossover_fm_batch_im_text_single(text_embeds, half_row=text_cross_kernel_size//2, half_col=77, batch_indices=batch_indices)
 
         return image_embeds, text_embeds
     
