@@ -87,7 +87,6 @@ class Attention(nn.Module):
         else:
             self.q_bias = None
             self.v_bias = None
-
         if window_size:
             self.window_size = window_size
             self.num_relative_distance = (2 * window_size[0] - 1) * (2 * window_size[1] - 1) + 3
@@ -122,7 +121,7 @@ class Attention(nn.Module):
         self.proj = nn.Linear(all_head_dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x, rel_pos_bias=None, return_attention=False, return_qkv=False, image_atts=None, output_attentions=None):
+    def forward(self, x, rel_pos_bias=None, return_attention=False, return_qkv=False, image_atts=None, output_attentions=None, mask=None):
         B, N, C = x.shape
         qkv_bias = None
         if self.q_bias is not None:
@@ -141,6 +140,9 @@ class Attention(nn.Module):
                     self.window_size[0] * self.window_size[1] + 1,
                     self.window_size[0] * self.window_size[1] + 1, -1)  # Wh*Ww,Wh*Ww,nH
             relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+            #print("mask: ", mask.shape)
+            #print("relative_position_bias: ",relative_position_bias.shape)
+            #print("attn: ", attn.shape)
             attn = attn + relative_position_bias.unsqueeze(0)
 
         if rel_pos_bias is not None:
@@ -188,21 +190,21 @@ class Block(nn.Module):
         else:
             self.gamma_1, self.gamma_2 = None, None
 
-    def forward(self, x, rel_pos_bias=None, return_attention=False, return_qkv=False, image_atts=None, output_attentions=None):
+    def forward(self, x, rel_pos_bias=None, return_attention=False, return_qkv=False, image_atts=None, output_attentions=None, mask=None):
         if return_attention:
-            return self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, return_attention=True, image_atts=image_atts)
+            return self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, return_attention=True, image_atts=image_atts, mask=mask)
         if return_qkv:
-            y, qkv = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, return_qkv=return_qkv, image_atts=image_atts)
+            y, qkv = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, return_qkv=return_qkv, image_atts=image_atts, mask=mask)
             x = x + self.drop_path(self.gamma_1 * y)
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
             return x, qkv
 
         if self.gamma_1 is None:
-            y, x_attns = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, image_atts=image_atts, output_attentions=output_attentions)
+            y, x_attns = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, image_atts=image_atts, output_attentions=output_attentions, mask=mask)
             x = x + self.drop_path(y)
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
-            y, x_attns = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, image_atts=image_atts, output_attentions=output_attentions)
+            y, x_attns = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias, image_atts=image_atts, output_attentions=output_attentions, mask=mask)
             x = x + self.drop_path(self.gamma_1 * y)
             x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
 
@@ -435,6 +437,204 @@ class VisionTransformer(nn.Module):
             return torch.cat([x_bs_cls.transpose(1, 2), x_bs], dim=1), \
                    torch.cat([x_cls.transpose(1, 2), x], dim=1)
 
+class VisionTransformerMasked(nn.Module):
+    """ Vision Transformer with support for patch or hybrid CNN input stage
+    """
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
+                 num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
+                 drop_path_rate=0., norm_layer=nn.LayerNorm, init_values=None,
+                 use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False,
+                 use_mean_pooling=True, init_scale=0.001, local_attn_depth=-1, vision_num_hidden_layers=-1, mask_ratio=0.5):
+        super().__init__()
+        # print("### local_attn_depth: ", local_attn_depth, flush=True)
+        self.local_attn_depth = -1  # a way to calculate region features; deprecated
+
+        if vision_num_hidden_layers > 0:
+            print("### vision_num_hidden_layers: ", vision_num_hidden_layers, flush=True)
+            depth = vision_num_hidden_layers
+
+        self.depth = depth
+        if self.local_attn_depth <= 0:
+            self.avgpool = nn.AdaptiveAvgPool1d(1)
+
+        self.num_classes = num_classes
+        self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+
+        self.patch_embed = PatchEmbed(
+            img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+        num_patches = self.patch_embed.num_patches
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        # self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        if use_abs_pos_emb:
+            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+        else:
+            self.pos_embed = None
+        self.pos_drop = nn.Dropout(p=drop_rate)
+
+        if use_shared_rel_pos_bias:
+            self.rel_pos_bias = RelativePositionBias(window_size=self.patch_embed.patch_shape, num_heads=num_heads)
+        else:
+            self.rel_pos_bias = None
+
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        self.use_rel_pos_bias = use_rel_pos_bias
+        
+        patch_shape = self.patch_embed.patch_shape
+        window_size = (int(patch_shape[0] * mask_ratio), int(patch_shape[1] * mask_ratio)) if use_rel_pos_bias else None
+        self.blocks = nn.ModuleList([
+            Block(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
+                init_values=init_values, window_size=window_size)
+            for i in range(depth)])
+        self.norm = nn.Identity() if use_mean_pooling else norm_layer(embed_dim)
+        self.fc_norm = norm_layer(embed_dim) if use_mean_pooling else None
+
+        self.mask_ratio = mask_ratio
+        if self.pos_embed is not None:
+            trunc_normal_(self.pos_embed, std=.02)
+        trunc_normal_(self.cls_token, std=.02)
+        # trunc_normal_(self.mask_token, std=.02)
+        self.apply(self._init_weights)
+        self.fix_init_weight()
+
+    def fix_init_weight(self):
+        def rescale(param, layer_id):
+            param.div_(math.sqrt(2.0 * layer_id))
+
+        for layer_id, layer in enumerate(self.blocks):
+            rescale(layer.attn.proj.weight.data, layer_id + 1)
+            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def get_num_layers(self):
+        return len(self.blocks)
+
+    @torch.jit.ignore
+    def no_weight_decay(self):
+        return {'pos_embed', 'cls_token'}
+
+    def interpolate_pos_encoding(self, x, w, h):
+        npatch = x.shape[1] - 1
+        N = self.pos_embed.shape[1] - 1
+        if npatch == N and w == h:
+            return self.pos_embed
+        class_pos_embed = self.pos_embed[:, 0]
+        patch_pos_embed = self.pos_embed[:, 1:]
+        dim = x.shape[-1]
+        w0 = w // self.patch_embed.patch_size[0]
+        h0 = h // self.patch_embed.patch_size[0]
+        # we add a small number to avoid floating point error in the interpolation
+        # see discussion at https://github.com/facebookresearch/dino/issues/8
+        w0, h0 = w0 + 0.1, h0 + 0.1
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+            scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
+            mode='bicubic',
+        )
+        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
+
+    def random_masking(self, x, mask_ratio):
+        """
+        Perform per-sample random masking by per-sample shuffling.
+        Per-sample shuffling is done by argsort random noise.
+        x: [N, L, D], sequence
+        """
+        N, L, D = x.shape  # batch, length, dim
+        len_keep = int(L * (1 - mask_ratio))
+        
+        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
+        
+        # sort noise for each sample
+        ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
+        ids_restore = torch.argsort(ids_shuffle, dim=1)
+
+        # keep the first subset
+        ids_keep = ids_shuffle[:, :len_keep]
+        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+
+        # generate the binary mask: 0 is keep, 1 is remove
+        mask = torch.ones([N, L], device=x.device)
+        mask[:, :len_keep] = 0
+        # unshuffle to get the binary mask
+        mask = torch.gather(mask, dim=1, index=ids_restore)
+
+        return x_masked, mask, ids_restore
+
+    def forward(self, x, idx_to_group_img=None, image_atts=None, output_attentions=None, output_hidden_states=None):
+        assert output_attentions == output_hidden_states
+
+        B, nc, w, h = x.shape
+        x = self.patch_embed(x)
+        batch_size, seq_len, _ = x.size()
+
+        x, mask, ids_restore = self.random_masking(x, self.mask_ratio)
+
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+
+        x = torch.cat((cls_tokens, x), dim=1)
+        if self.pos_embed is not None:
+            if x.shape[1] != self.pos_embed.shape[1]:
+                x = x + self.interpolate_pos_encoding(x, w, h)
+            else:
+                x = x + self.pos_embed
+
+        x = self.pos_drop(x)
+
+        rel_pos_bias = self.rel_pos_bias() if self.rel_pos_bias is not None else None
+
+        all_states = () if output_hidden_states else None
+        all_attentions = () if output_attentions else None
+
+
+        for i, blk in enumerate(self.blocks):
+            if output_hidden_states:
+                all_states = all_states + (x,)  # first is patch embeddings; same as bert
+
+            x, x_attns = blk(x, rel_pos_bias=rel_pos_bias, output_attentions=output_attentions, mask=mask)
+            if output_attentions:
+                all_attentions = all_attentions + (x_attns,)
+
+        _, x = torch.split(x, [1, x.shape[1]-1], dim=1)
+
+        x = self.fc_norm(self.norm(x))
+
+        x_cls = self.avgpool(x.transpose(1, 2))  # B C 1
+
+        if idx_to_group_img is None:
+            x = torch.cat([x_cls.transpose(1, 2), x], dim=1)
+
+            if output_hidden_states:
+                all_states = all_states + (x,)
+                assert len(all_states) == len(all_attentions) + 1
+                return {'last_hidden_state': x, 'hidden_states': all_states, 'attentions': all_attentions}
+
+            else:
+                return x
+
+        else:
+            if output_hidden_states or output_attentions:
+                raise NotImplementedError("not implemented KD for BBox Loss")
+
+            x_bs = torch.gather(x, dim=0, index=idx_to_group_img.view(-1, 1, 1).expand(-1, x.shape[1], x.shape[2]))
+            weights = image_atts[:, 1:].unsqueeze(2)  # B L 1
+            x_bs_cls = torch.sum((weights * x_bs).transpose(1, 2), dim=-1, keepdim=True)  # B C 1
+            x_bs_cls = x_bs_cls / torch.sum(weights.transpose(1, 2), dim=-1, keepdim=True)  # avgpool
+
+            return torch.cat([x_bs_cls.transpose(1, 2), x_bs], dim=1), \
+                   torch.cat([x_cls.transpose(1, 2), x], dim=1)             
+
 
 def beit_base_patch16(img_size, **kwargs):
     model = VisionTransformer(
@@ -445,6 +645,14 @@ def beit_base_patch16(img_size, **kwargs):
     model.default_cfg = _cfg()
     return model
 
+def beit_base_patch16_mask(img_size, **kwargs):
+    model = VisionTransformerMasked(
+        img_size=img_size, patch_size=16, embed_dim=768,
+        depth=12,
+        num_heads=12, mlp_ratio=4, # qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    model.default_cfg = _cfg()
+    return model
 
 def beit_large_patch16(img_size, **kwargs):
     model = VisionTransformer(
@@ -453,6 +661,12 @@ def beit_large_patch16(img_size, **kwargs):
     model.default_cfg = _cfg()
     return model
 
+def beit_large_patch16_mask(img_size, **kwargs):
+    model = VisionTransformerMasked(
+        img_size=img_size, patch_size=16, embed_dim=1024, depth=24, num_heads=16, mlp_ratio=4, #qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    model.default_cfg = _cfg()
+    return model
 
 def beit_huge_patch14_224(**kwargs):
     model = VisionTransformer(

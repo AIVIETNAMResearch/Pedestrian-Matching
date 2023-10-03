@@ -169,7 +169,7 @@ def build_mlp(input_dim, output_dim):
     )
 
 
-def build_vision_encoder(config, load_params=False):
+def build_vision_encoder(config, load_params=False, is_masked=False):
     """
     Args:
         load_params: False when building fine-tuning models
@@ -250,9 +250,15 @@ def build_vision_encoder(config, load_params=False):
         vision_width = vision_config['vision_width']
 
         if 'base' in config['vision_config']:
-            from models.beit2 import beit_base_patch16 as beit_model
+            if config['use_mask'] and is_masked:
+                from models.beit2 import beit_base_patch16_mask as beit_model
+            else:
+                from models.beit2 import beit_base_patch16 as beit_model
         elif 'large' in config['vision_config']:
-            from models.beit2 import beit_large_patch16 as beit_model
+            if config['use_mask'] and is_masked:
+                from models.beit2 import beit_large_patch16_mask as beit_model
+            else:
+                from models.beit2 import beit_large_patch16 as beit_model
         else:
             raise ValueError
 
@@ -468,11 +474,11 @@ def load_pretrained(model, ckpt_rpath, config, is_eval=False, load_text=False, u
 class XVLMBase(nn.Module):
     def __init__(self, config=None, load_vision_params=False, load_text_params=False, load_cross_params=False,
                  use_contrastive_loss=False, use_matching_loss=False, use_mlm_loss=False, use_bbox_loss=False,
-                 config_text=None, pretraining=False):
+                 config_text=None, pretraining=False, is_masked=False):
         super().__init__()
 
         self.init_params = []
-        self.vision_encoder = self.build_vision_encoder(config, load_params=load_vision_params)
+        self.vision_encoder = self.build_vision_encoder(config, load_params=load_vision_params, is_masked=is_masked)
         self.vision_width = self.vision_encoder.vision_width
 
         self.text_encoder, missing_keys = self.build_text_encoder(config, vision_width=self.vision_width,
@@ -535,8 +541,8 @@ class XVLMBase(nn.Module):
         else:
             self.init_params = []
 
-    def build_vision_encoder(self, config, load_params=False):
-        return build_vision_encoder(config, load_params=load_params)
+    def build_vision_encoder(self, config, load_params=False, is_masked=False):
+        return build_vision_encoder(config, load_params=load_params, is_masked=is_masked)
 
     def build_text_encoder(self, config, vision_width, load_text_params=False, use_mlm_loss=False, config_text=None):
         """
