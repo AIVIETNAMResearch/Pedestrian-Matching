@@ -25,6 +25,7 @@ from utils.mlm_tool import mlm, TextMaskingGenerator
 from dataset import create_dataset, create_sampler, create_loader, build_tokenizer
 from scheduler import create_scheduler
 from optim import create_optimizer
+from models.clip import clip
 
 
 def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, config):
@@ -44,9 +45,10 @@ def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, co
 
 
     accumulate_steps = int(config.get('accumulate_steps', 1))
-    for i, (image1, image2, caption1, caption2, idx) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for i, (image1, image2, image_cnn, caption1, caption2, idx) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         image1 = image1.to(device, non_blocking=True)
         image2 = image2.to(device, non_blocking=True)
+        image_cnn = image_cnn.to(device, non_blocking=True)
         idx = idx.to(device, non_blocking=True)
         text_input1 = tokenizer(caption1, padding='max_length', truncation=True, max_length=config['max_tokens'], return_tensors="pt").to(device)
         text_input2 = tokenizer(caption2, padding='max_length', truncation=True, max_length=config['max_tokens'], return_tensors="pt").to(device)
@@ -61,12 +63,17 @@ def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, co
                 mlm_input = (text_ids_masked, masked_pos, masked_ids)
 
                 if config["use_id_loss"]:
-                    loss_itc, loss_itm, loss_id, loss_mlm = model(image1, image2, text_input1.input_ids, text_input1.attention_mask, 
+                    loss_itc, loss_itm, loss_id, loss_mlm = model(image1, image2, image_cnn, text_input1.input_ids, text_input1.attention_mask, 
                                         text_input2.input_ids, text_input2.attention_mask, idx=idx, mlm_inputs=mlm_input)
                     loss = loss_itc + loss_itm + loss_id + loss_mlm 
                 else:
-                    loss_itc, loss_itm, loss_mlm = model(image1, image2, text_input1.input_ids, text_input1.attention_mask, 
-                                            text_input2.input_ids, text_input2.attention_mask, idx=idx, mlm_inputs=mlm_input)
+                    #text_input_clip = None
+                    #if config["use_clip_feats"]:
+                    #    text_input_clip = clip.tokenize(caption1, truncate=True).to(device)
+
+                    loss_itc, loss_itm, loss_mlm = model(image1, image2, image_cnn, text_input1.input_ids, text_input1.attention_mask, 
+                                            text_input2.input_ids, text_input2.attention_mask, idx=idx, mlm_inputs=mlm_input) 
+                                            #text_input_clip=text_input_clip, image_cnn=image_cnn)
                     loss = loss_itc + loss_itm + loss_mlm
         else:
             loss_itc, loss_itm = model(image1, image2, text_input1.input_ids, text_input1.attention_mask, 
@@ -75,7 +82,6 @@ def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, co
             loss = loss_itc + loss_itm
         if accumulate_steps > 1:
             loss = loss / accumulate_steps
-        
         # backward
         loss.backward()
         #scaler.scale(loss).backward()
@@ -226,8 +232,8 @@ def evaluation(model, data_loader, tokenizer, device, config):
         text_embed = model.get_features(text_embeds=text_feat)
 
         text_embed = F.normalize(model.text_proj(text_feat[:, 0, :]))
-        text_embeds.append(text_embed)
-        text_feats.append(text_feat)
+        text_embeds.append(text_embed.detach().cpu())
+        text_feats.append(text_feat.detach().cpu())
         text_atts.append(text_input.attention_mask)
     text_embeds = torch.cat(text_embeds, dim=0)
     text_feats = torch.cat(text_feats, dim=0)
@@ -240,8 +246,8 @@ def evaluation(model, data_loader, tokenizer, device, config):
 
         image_feat, _ = model.get_vision_embeds(image)
         image_embed = model.get_features(image_embeds=image_feat)
-        image_feats.append(image_feat)
-        image_embeds.append(image_embed)
+        image_feats.append(image_feat.detach().cpu())
+        image_embeds.append(image_embed.detach().cpu())
 
     image_feats = torch.cat(image_feats, dim=0)
     image_embeds = torch.cat(image_embeds, dim=0)
@@ -258,9 +264,9 @@ def evaluation(model, data_loader, tokenizer, device, config):
         topk_sim, topk_idx = sims.topk(k=config['k_test'], dim=0)
         encoder_output = image_feats[topk_idx]
         encoder_att = torch.ones(encoder_output.size()[:-1], dtype=torch.long).to(device)
-        output = model.get_cross_embeds(image_embeds=encoder_output, image_atts=encoder_att,
-                                         text_embeds=text_feats[start + i].repeat(config['k_test'], 1, 1),
-                                         text_atts=text_atts[start + i].repeat(config['k_test'], 1))
+        output = model.get_cross_embeds(image_embeds=encoder_output.to(device), image_atts=encoder_att.to(device),
+                                         text_embeds=text_feats[start + i].repeat(config['k_test'], 1, 1).to(device),
+                                         text_atts=text_atts[start + i].repeat(config['k_test'], 1).to(device))
 
         score = model.itm_head(output[:, 0, :])[:, 1]
         score_matrix_t2i[start + i, topk_idx] = score

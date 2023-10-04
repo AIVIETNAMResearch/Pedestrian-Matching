@@ -166,7 +166,7 @@ class re_eval_dataset(Dataset):
 
 
 class ps_train_dataset(Dataset):
-    def __init__(self, ann_file, transform_weak, transform_strong, image_root, max_words=30, weak_pos_pair_probability=0.1):
+    def __init__(self, ann_file, transform_weak, transform_strong, image_root, max_words=30, weak_pos_pair_probability=0.1, transform_cnn=None):
         anns = []
         for f in ann_file:
             anns += json.load(open(f, 'r'))
@@ -178,6 +178,7 @@ class ps_train_dataset(Dataset):
         self.weak_pos_pair_probability = weak_pos_pair_probability 
         self.person2image = defaultdict(list)
         self.person2text = defaultdict(list)
+        self.transform_cnn = transform_cnn
         person_id2idx = {}
 
         self.add_eos = True
@@ -208,6 +209,10 @@ class ps_train_dataset(Dataset):
         aug_caption = aug_captions[random.randint(0, 8)]
 
         aug_caption = pre_caption(aug_caption, self.max_words)
+
+        if self.transform_cnn:
+            image_cnn = self.transform_cnn(image)
+            return image1, image2, image_cnn, caption, aug_caption, person
     
         return image1, image2, caption, aug_caption, person
 

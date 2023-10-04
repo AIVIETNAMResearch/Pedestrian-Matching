@@ -72,6 +72,11 @@ def create_dataset(dataset, config, evaluate=False):
         transforms.ToTensor(),
         normalize,
     ])
+    train_transform_ps_cnn = transforms.Compose([
+        transforms.Resize((224, 224), interpolation=InterpolationMode.BICUBIC),
+        transforms.ToTensor(),
+        normalize,
+    ])
 
     train_transform_ps_strong = transforms.Compose([
         transforms.Resize((config['image_res'], config['image_res']), interpolation=InterpolationMode.BICUBIC),
@@ -192,7 +197,7 @@ def create_dataset(dataset, config, evaluate=False):
         if evaluate:
             return None, None, test_dataset
 
-        train_dataset = ps_train_dataset(config['train_file'], train_transform_ps_weak, train_transform_ps_strong, config['image_root'], config["max_tokens"])
+        train_dataset = ps_train_dataset(config['train_file'], train_transform_ps_weak, train_transform_ps_strong, config['image_root'], config["max_tokens"], transform_cnn=train_transform_ps_cnn)
         val_dataset = ps_eval_dataset(config['val_file'], test_transform, config['image_root'], config["max_tokens"])
 
         return train_dataset, val_dataset, test_dataset
