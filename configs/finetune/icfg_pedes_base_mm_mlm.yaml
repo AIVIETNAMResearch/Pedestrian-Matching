@@ -1,8 +1,8 @@
-image_root: 'data/CUHK-PEDES/imgs'
-train_file: ['data/CUHK-PEDES/processed_data/train.json']
-val_file: 'data/CUHK-PEDES/processed_data/test.json'
+image_root: 'data/ICFG-PEDES/imgs'
+train_file: ['data/ICFG-PEDES/processed_data/train.json']
+val_file: 'data/ICFG-PEDES/processed_data/test.json'
 
-test_file: 'data/CUHK-PEDES/processed_data/test.json'
+test_file: 'data/ICFG-PEDES/processed_data/test.json'
 
 
 use_cross_aug: False
@@ -55,8 +55,8 @@ erasing_p: 0.6
 
 ## Other Settings
 optimizer: {opt: adamW, lr: 1e-5, weight_decay: 0.01, lr_mult: 2, vision_lr: 1e-5, text_lr: 1e-5}
-schedular: {sched: cosine, epochs: 31, num_warmup_steps: 0.1}
+schedular: {sched: cosine, epochs: 61, num_warmup_steps: 0.1}
 eval_epoch: 3  # epoch index
 
-use_cnn_feats: True
+use_cnn_feats: False
 cnn_net: regnety_016

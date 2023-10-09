@@ -6,6 +6,7 @@ import random
 import numpy as np 
 from models.resnet import Get_Scalar, FeatureExtractor
 from models.clip.clip import load_visual as load_clip_visual
+import timm
 
 class SANNetwork(nn.Module):
     def __init__(self, input_size, num_heads=2, device="cuda"):
@@ -78,8 +79,11 @@ class XVLMForRetrieval(XVLMBase):
             self.momentum = config['momentum']
         
         #self.cnn_patch = FeatureExtractor(embed_dims=config['embed_dim'])
-        self.cnn_encoder = load_clip_visual("RN50", device="cpu")
-        self.cnn_proj = nn.Linear(self.cnn_encoder.output_dim, config["embed_dim"])
+        #self.cnn_encoder = timm
+        if config["use_cnn_feats"]:
+            self.cnn_encoder = timm.create_model(config["cnn_net"], pretrained=True, num_classes=config["embed_dim"])
+
+        #self.cnn_proj = nn.Linear(self.cnn_encoder.output_dim, config["embed_dim"])
 
         self.num_attention_heads = self.text_encoder.config.num_attention_heads
         self.init_params = []
@@ -87,7 +91,7 @@ class XVLMForRetrieval(XVLMBase):
         # parameter for Beta distribution of Mix Up
         self.alpha = 0.5
         # temperature params function
-        self.t_fn = Get_Scalar(0.5)  
+        #self.t_fn = Get_Scalar(0.5)  
         # initial iteration count
         self.it = 0
         
@@ -196,11 +200,13 @@ class XVLMForRetrieval(XVLMBase):
         
         if self.config["use_momentum"]:
             image_embeds_1, image_atts_1 = self.get_vision_embeds(image2)
-            cnn_patch = self.cnn_proj(self.cnn_encoder(image_cnn.type(self.cnn_encoder.conv1.weight.dtype)))
+            if self.config["use_cnn_feats"]:
+                cnn_patch = self.cnn_encoder(image_cnn)
 
         else:
             image_embeds_1, image_atts_1 = self.get_vision_embeds(image1)
-            cnn_patch = self.cnn_proj(self.cnn_encoder(image_cnn.type(self.cnn_encoder.conv1.weight.dtype)))
+            if self.config["use_cnn_feats"]:
+                cnn_patch = self.cnn_encoder(image_cnn)
 
         text_embeds_1 = self.get_text_embeds(text2_ids, text2_atts)
         
@@ -241,9 +247,13 @@ class XVLMForRetrieval(XVLMBase):
                 loss_itc_22 = self.get_contrastive_loss(image_feat_2, text_feat_2, idx=idx)
                 loss_itc_im = self.get_contrastive_loss(image_feat_1, image_feat_2, idx=idx)
                 loss_itc_txt = self.get_contrastive_loss(text_feat_1, text_feat_2, idx=idx)
-                loss_cnn = self.get_contrastive_loss(image_feat_1, cnn_patch, idx=idx)
+                if self.config["use_cnn_feats"]:
+                    loss_cnn = self.get_contrastive_loss(image_feat_1, cnn_patch, idx=idx)
+            if self.config["use_cnn_feats"]:
+                loss_itc = (loss_itc_11 + loss_itc_12 + loss_itc_21 + loss_itc_22 + loss_itc_im + loss_itc_txt + loss_cnn * 0.5) / 6.5
+            else:
+                loss_itc = (loss_itc_11 + loss_itc_12 + loss_itc_21 + loss_itc_22 + loss_itc_im + loss_itc_txt) / 6
 
-            loss_itc = (loss_itc_11 + loss_itc_12 + loss_itc_21 + loss_itc_22 + loss_itc_im + loss_itc_txt + loss_cnn * 0.5) / 6.5
         else:
             loss_itc = self.get_contrastive_loss(image_feat_1, text_feat_1, idx=idx)
 
