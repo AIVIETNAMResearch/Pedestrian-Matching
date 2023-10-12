@@ -256,6 +256,8 @@ class XVLMForRetrieval(XVLMBase):
 
         else:
             loss_itc = self.get_contrastive_loss(image_feat_1, text_feat_1, idx=idx)
+            if self.config["use_cnn_feats"]:
+                loss_itc += self.get_contrastive_loss(image_feat_1, cnn_patch)
 
 
         # loss_itm = self.get_matching_loss_ga_aug(image_embeds_1, image_atts_1, image_feat_1, text_embeds_1, text1_atts, text_feat_1, idx=idx)

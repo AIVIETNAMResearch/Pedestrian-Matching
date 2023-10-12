@@ -76,7 +76,7 @@ def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, co
                                             #text_input_clip=text_input_clip, image_cnn=image_cnn)
                     loss = loss_itc + loss_itm + loss_mlm
         else:
-            loss_itc, loss_itm = model(image1, image2, text_input1.input_ids, text_input1.attention_mask, 
+            loss_itc, loss_itm = model(image1, image2, image_cnn, text_input1.input_ids, text_input1.attention_mask, 
                                     text_input2.input_ids, text_input2.attention_mask, idx=idx)
 
             loss = loss_itc + loss_itm
