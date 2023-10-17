@@ -85,6 +85,7 @@ class XVLMForRetrieval(XVLMBase):
             if config["cnn_net"] == 'convnext_base.fb_in22k_ft_in1k':
                 self.pret_model = timm.create_model(config["cnn_net"] , pretrained=True, num_classes=0)
                 self.cnn_encoder = nn.Linear(self.pret_model.num_features, config["embed_dim"])
+                
         #self.cnn_proj = nn.Linear(self.cnn_encoder.output_dim, config["embed_dim"])
 
         self.num_attention_heads = self.text_encoder.config.num_attention_heads
@@ -203,16 +204,18 @@ class XVLMForRetrieval(XVLMBase):
         if self.config["use_momentum"]:
             image_embeds_1, image_atts_1 = self.get_vision_embeds(image2)
             if self.config["use_cnn_feats"]:
-                cnn_patch = self.cnn_encoder(image_cnn)
                 if self.config["cnn_net"] == 'convnext_base.fb_in22k_ft_in1k':
-                    cnn_patch = self.cnn_encoder(self.pret_model(image_cnn.type(self.cnn_encoder.stem[0].weight.dtype)))
+                    cnn_patch = self.cnn_encoder(self.pret_model(image_cnn.type(self.pret_model.stem[0].weight.dtype)))
+                else:
+                    cnn_patch = self.cnn_encoder(image_cnn)
 
         else:
             image_embeds_1, image_atts_1 = self.get_vision_embeds(image1)
             if self.config["use_cnn_feats"]:
-                cnn_patch = self.cnn_encoder(image_cnn)
                 if self.config["cnn_net"] == 'convnext_base.fb_in22k_ft_in1k':
-                    cnn_patch = self.cnn_encoder(self.pret_model(image_cnn.type(self.cnn_encoder.stem[0].weight.dtype)))
+                    cnn_patch = self.cnn_encoder(self.pret_model(image_cnn.type(self.pret_model.stem[0].weight.dtype)))
+                else:
+                    cnn_patch = self.cnn_encoder(image_cnn)
 
         text_embeds_1 = self.get_text_embeds(text2_ids, text2_atts)
         
