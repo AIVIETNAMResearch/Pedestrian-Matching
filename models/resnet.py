@@ -1,7 +1,10 @@
 import torch
 import torch.nn as  nn
 import torch.nn.functional as F
-from timm.models.layers.norm_act import BatchNormAct2d
+try:
+  from timm.models.layers.norm_act import BatchNormAct2d
+except:
+  from timm.models.layers import BatchNormAct2d
 
 class PatchEmbed(nn.Module):
   def __init__(self, image_size, embed_dims=512):

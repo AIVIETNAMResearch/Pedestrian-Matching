@@ -82,7 +82,9 @@ class XVLMForRetrieval(XVLMBase):
         #self.cnn_encoder = timm
         if config["use_cnn_feats"]:
             self.cnn_encoder = timm.create_model(config["cnn_net"], pretrained=True, num_classes=config["embed_dim"])
-
+            if config["cnn_net"] == 'convnext_base.fb_in22k_ft_in1k':
+                self.pret_model = timm.create_model(config["cnn_net"] , pretrained=True, num_classes=0)
+                self.cnn_encoder = nn.Linear(self.pret_model.num_features, config["embed_dim"])
         #self.cnn_proj = nn.Linear(self.cnn_encoder.output_dim, config["embed_dim"])
 
         self.num_attention_heads = self.text_encoder.config.num_attention_heads
@@ -202,17 +204,21 @@ class XVLMForRetrieval(XVLMBase):
             image_embeds_1, image_atts_1 = self.get_vision_embeds(image2)
             if self.config["use_cnn_feats"]:
                 cnn_patch = self.cnn_encoder(image_cnn)
+                if self.config["cnn_net"] == 'convnext_base.fb_in22k_ft_in1k':
+                    cnn_patch = self.cnn_encoder(self.pret_model(image_cnn.type(self.cnn_encoder.stem[0].weight.dtype)))
 
         else:
             image_embeds_1, image_atts_1 = self.get_vision_embeds(image1)
             if self.config["use_cnn_feats"]:
                 cnn_patch = self.cnn_encoder(image_cnn)
+                if self.config["cnn_net"] == 'convnext_base.fb_in22k_ft_in1k':
+                    cnn_patch = self.cnn_encoder(self.pret_model(image_cnn.type(self.cnn_encoder.stem[0].weight.dtype)))
 
         text_embeds_1 = self.get_text_embeds(text2_ids, text2_atts)
         
         image_feat_1, text_feat_1 = self.get_features(image_embeds_1, text_embeds_1)
-
-        cnn_patch = F.normalize(cnn_patch)
+        if self.config["use_cnn_feats"]:
+            cnn_patch = F.normalize(cnn_patch)
         # Mix up
         #image_feat_1 = self.mixup_one_target(image_feat_1, cnn_patch,self.alpha, is_bias=True)
 
@@ -251,6 +257,7 @@ class XVLMForRetrieval(XVLMBase):
                     loss_cnn = self.get_contrastive_loss(image_feat_1, cnn_patch, idx=idx)
             if self.config["use_cnn_feats"]:
                 loss_itc = (loss_itc_11 + loss_itc_12 + loss_itc_21 + loss_itc_22 + loss_itc_im + loss_itc_txt + loss_cnn * 0.5) / 6.5
+                
             else:
                 loss_itc = (loss_itc_11 + loss_itc_12 + loss_itc_21 + loss_itc_22 + loss_itc_im + loss_itc_txt) / 6
 
@@ -258,7 +265,7 @@ class XVLMForRetrieval(XVLMBase):
             loss_itc = self.get_contrastive_loss(image_feat_1, text_feat_1, idx=idx)
             if self.config["use_cnn_feats"]:
                 loss_itc += self.get_contrastive_loss(image_feat_1, cnn_patch)
-
+                
 
         # loss_itm = self.get_matching_loss_ga_aug(image_embeds_1, image_atts_1, image_feat_1, text_embeds_1, text1_atts, text_feat_1, idx=idx)
         loss_itm = self.get_matching_loss(image_embeds_1, image_atts_1, image_feat_1, text_embeds_1, text1_atts, text_feat_1, idx=idx)

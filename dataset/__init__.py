@@ -23,6 +23,8 @@ from dataset.wit_dataset import wit_train_dataset, wit_eval_dataset
 from dataset.randaugment import RandomAugment
 from dataset.random_erasing import RandomErasing
 
+import timm
+
 def create_dataset(dataset, config, evaluate=False):
 
     if dataset == 'pretrain_text':
@@ -72,11 +74,17 @@ def create_dataset(dataset, config, evaluate=False):
         transforms.ToTensor(),
         normalize,
     ])
-    train_transform_ps_cnn = transforms.Compose([
-        transforms.Resize((224, 224), interpolation=InterpolationMode.BICUBIC),
-        transforms.ToTensor(),
-        normalize,
-    ])
+    # train_transform_ps_cnn = transforms.Compose([
+    #     transforms.Resize((224, 224), interpolation=InterpolationMode.BICUBIC),
+    #     transforms.ToTensor(),
+    #     normalize,
+    # ])
+
+    data_config = {'input_size': (3, 224, 224), 'interpolation': 'bicubic', 
+                   'mean': (0.485, 0.456, 0.406), 'std': (0.229, 0.224, 0.225), 
+                   'crop_pct': 0.875, 'crop_mode': 'center'}
+    train_transform_ps_cnn = timm.data.create_transform(**data_config, is_training=False)
+    
 
     train_transform_ps_strong = transforms.Compose([
         transforms.Resize((config['image_res'], config['image_res']), interpolation=InterpolationMode.BICUBIC),

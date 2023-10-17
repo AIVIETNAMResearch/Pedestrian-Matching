@@ -588,7 +588,7 @@ if __name__ == '__main__':
     parser.add_argument('--text2video', action='store_true', help="train a text2video retrieval model")
 
     args = parser.parse_args()
-
+    
     config = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
     utils.update_config(config, args.override_cfg)
     if utils.is_main_process():
