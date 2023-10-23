@@ -515,11 +515,13 @@ def main(args, config):
                     if args.text2video:
                         score = test_result['img_r_mean']
                     elif args.pick_best_r1:
-                        score = (test_result['txt_r1'] + test_result['img_r1']) / 2
+                        score = test_result['r1']
                     elif args.pick_best_t2v:
                         score = test_result['img_r_mean']
                     else:
-                        score = test_result['r_mean']
+                        # score = test_result['r_mean']
+                        score = test_result['r1']
+
 
                     if score > best:
                         save_obj = {

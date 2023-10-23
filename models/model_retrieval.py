@@ -211,8 +211,9 @@ class XVLMForRetrieval(XVLMBase):
         text_embeds_1 = self.get_text_embeds(text2_ids, text2_atts)
         
         image_feat_1, text_feat_1 = self.get_features(image_embeds_1, text_embeds_1)
-
-        cnn_patch = F.normalize(cnn_patch)
+        
+        if self.config["use_cnn_feats"]:
+            cnn_patch = F.normalize(cnn_patch)
         # Mix up
         #image_feat_1 = self.mixup_one_target(image_feat_1, cnn_patch,self.alpha, is_bias=True)
 
