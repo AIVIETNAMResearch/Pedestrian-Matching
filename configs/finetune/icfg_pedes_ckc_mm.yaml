@@ -59,4 +59,4 @@ schedular: {sched: cosine, epochs: 61, num_warmup_steps: 0.1}
 eval_epoch: 3  # epoch index
 
 use_cnn_feats: True
-cnn_net: resnet50
+cnn_net: convnext_base.fb_in22k_ft_in1k

@@ -111,105 +111,6 @@ def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, co
     return {k: "{:.5f}".format(meter.global_avg) for k, meter in metric_logger.meters.items()}
 
 
-# @torch.no_grad()
-# def evaluation(model, data_loader, tokenizer, device, config):
-#     model.eval()
-    
-#     metric_logger = utils.MetricLogger(delimiter="  ")
-#     header = 'Evaluation:'    
-    
-#     print('Computing features for evaluation...')
-#     start_time = time.time()  
-
-#     texts = data_loader.dataset.text   
-#     num_text = len(texts)
-#     text_bs = config['batch_size_test_text']  # 256
-
-#     text_feats = []  # in fact, text_embeds
-#     text_embeds = []  # in fact, text_feats...
-#     text_atts = []
-#     for i in range(0, num_text, text_bs):
-#         text = texts[i: min(num_text, i + text_bs)]
-#         text_input = tokenizer(text, padding='max_length', truncation=True, max_length=config['max_tokens'],
-#                                return_tensors="pt").to(device)
-
-#         text_feat = model.get_text_embeds(text_input.input_ids, text_input.attention_mask)
-#         text_embed = model.get_features(text_embeds=text_feat)
-
-#         text_feats.append(text_feat)
-#         text_atts.append(text_input.attention_mask)
-#         text_embeds.append(text_embed)
-
-#     text_embeds = torch.cat(text_embeds, dim=0)
-#     text_atts = torch.cat(text_atts, dim=0)
-#     text_feats = torch.cat(text_feats, dim=0)
-
-#     image_feats = []
-#     image_embeds = []
-#     for image, img_id in data_loader:
-#         image = image.to(device)
-
-#         image_feat, _ = model.get_vision_embeds(image)
-#         image_embed = model.get_features(image_embeds=image_feat)
-#         image_feats.append(image_feat)
-#         image_embeds.append(image_embed)
-
-#     image_feats = torch.cat(image_feats, dim=0)
-#     image_embeds = torch.cat(image_embeds, dim=0)
-    
-#     sims_matrix = image_embeds @ text_embeds.t()
-#     score_matrix_i2t = torch.full((len(data_loader.dataset.image), len(texts)), -100.0).to(device)
-
-#     num_tasks = utils.get_world_size()
-#     rank = utils.get_rank()
-#     step = sims_matrix.size(0) // num_tasks + 1
-#     start = rank * step
-#     end = min(sims_matrix.size(0), start + step)
-
-#     for i, sims in enumerate(metric_logger.log_every(sims_matrix[start:end], 50, header)):
-#         topk_sim, topk_idx = sims.topk(k=config['k_test'], dim=0)
-
-#         encoder_output = image_feats[start + i].repeat(config['k_test'], 1, 1)
-#         encoder_att = torch.ones(encoder_output.size()[:-1], dtype=torch.long).to(device)
-
-#         output = model.get_cross_embeds(image_embeds=encoder_output, image_atts=encoder_att,
-#                                         text_embeds=text_feats[topk_idx], text_atts=text_atts[topk_idx])
-
-#         score = model.itm_head(output[:, 0, :])[:, 1]
-
-#         score_matrix_i2t[start + i, topk_idx] = score
-
-#     sims_matrix = sims_matrix.t()
-#     score_matrix_t2i = torch.full((len(texts), len(data_loader.dataset.image)), -100.0).to(device)
-    
-#     step = sims_matrix.size(0)//num_tasks + 1
-#     start = rank*step
-#     end = min(sims_matrix.size(0), start + step)
-
-#     for i, sims in enumerate(metric_logger.log_every(sims_matrix[start:end], 50, header)):
-#         topk_sim, topk_idx = sims.topk(k=config['k_test'], dim=0)
-#         encoder_output = image_feats[topk_idx]
-#         encoder_att = torch.ones(encoder_output.size()[:-1], dtype=torch.long).to(device)
-
-#         output = model.get_cross_embeds(image_embeds=encoder_output, image_atts=encoder_att,
-#                                         text_embeds=text_feats[start + i].repeat(config['k_test'], 1, 1),
-#                                         text_atts=text_atts[start + i].repeat(config['k_test'], 1))
-
-#         score = model.itm_head(output[:, 0, :])[:, 1]
-
-#         score_matrix_t2i[start + i, topk_idx] = score
-
-#     if args.distributed:
-#         dist.barrier()   
-#         torch.distributed.all_reduce(score_matrix_i2t, op=torch.distributed.ReduceOp.SUM) 
-#         torch.distributed.all_reduce(score_matrix_t2i, op=torch.distributed.ReduceOp.SUM)        
-        
-#     total_time = time.time() - start_time
-#     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-#     print('Evaluation time {}'.format(total_time_str)) 
-
-#     return score_matrix_i2t.cpu().numpy(), score_matrix_t2i.cpu().numpy()
-
 @torch.no_grad()
 def evaluation(model, data_loader, tokenizer, device, config):
     # evaluate
@@ -318,53 +219,6 @@ def itm_eval(scores_t2i, img2person, txt2person, eval_mAP):
                        'r_mean': ir_mean,
                        }
     return eval_result
-
-# @torch.no_grad()
-# def itm_eval(scores_i2t, scores_t2i, txt2img, img2txt):
-#     # Images->Text
-#     ranks = np.zeros(scores_i2t.shape[0])
-#     for index, score in enumerate(scores_i2t):
-#         inds = np.argsort(score)[::-1]
-#         # Score
-#         rank = 1e20
-#         for i in img2txt[index]:
-#             tmp = np.where(inds == i)[0][0]
-#             if tmp < rank:
-#                 rank = tmp
-#         ranks[index] = rank
-
-#     # Compute metrics
-#     tr1 = 100.0 * len(np.where(ranks < 1)[0]) / len(ranks)
-#     tr5 = 100.0 * len(np.where(ranks < 5)[0]) / len(ranks)
-#     tr10 = 100.0 * len(np.where(ranks < 10)[0]) / len(ranks)
-
-#     # Text->Images
-#     ranks = np.zeros(scores_t2i.shape[0])
-
-#     for index, score in enumerate(scores_t2i):
-#         inds = np.argsort(score)[::-1]
-#         ranks[index] = np.where(inds == txt2img[index])[0][0]
-
-#     # Compute metrics
-#     ir1 = 100.0 * len(np.where(ranks < 1)[0]) / len(ranks)
-#     ir5 = 100.0 * len(np.where(ranks < 5)[0]) / len(ranks)
-#     ir10 = 100.0 * len(np.where(ranks < 10)[0]) / len(ranks)
-
-#     tr_mean = (tr1 + tr5 + tr10) / 3
-#     ir_mean = (ir1 + ir5 + ir10) / 3
-#     r_mean = (tr_mean + ir_mean) / 2
-
-#     eval_result = {'txt_r1': tr1,
-#                    'txt_r5': tr5,
-#                    'txt_r10': tr10,
-#                    'txt_r_mean': tr_mean,
-#                    'img_r1': ir1,
-#                    'img_r5': ir5,
-#                    'img_r10': ir10,
-#                    'img_r_mean': ir_mean,
-#                    'r_mean': r_mean}
-#     return eval_result
-
 
 def main(args, config):
     utils.init_distributed_mode(args)
@@ -590,7 +444,7 @@ if __name__ == '__main__':
     parser.add_argument('--text2video', action='store_true', help="train a text2video retrieval model")
 
     args = parser.parse_args()
-
+    
     config = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
     utils.update_config(config, args.override_cfg)
     if utils.is_main_process():
