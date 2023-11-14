@@ -49,12 +49,12 @@ python data_process.py --dataset_name "RSTPReid" --dataset_root_dir [RSTPReid DI
 python3 Retrieval.py --config "your/config/file" --checkpoint "your/checkpoint/file" --output_dir "/your.output/file" --pick_best_r1
 ```
 
-#### Checkpoints
+### Checkpoints
 The checkpoints can be found in this [drive](https://drive.google.com/drive/folders/1EYi2rGFmSuGQU5GRU0-nHy0ewMFQMq7M?usp=sharing)
 
 
-#### Acknowledgements
+### Acknowledgements
 This paper is sponsored by [AI VIETNAM](https://aivietnam.edu.vn/). The implementation of this paper relies on resources from [X2-VLM](https://github.com/zengyan-97/X2-VLM) and [timm](https://github.com/huggingface/pytorch-image-models/tree/main/timm). We sincerely appreciate the original authors for their open-sourcing.
 
-#### Citation
+### Citation
 If you finds thiscode useful for your research, please cite our paper.
