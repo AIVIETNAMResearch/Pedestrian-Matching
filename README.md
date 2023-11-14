@@ -43,10 +43,16 @@ python data_process.py --dataset_name "RSTPReid" --dataset_root_dir [RSTPReid DI
 
 ```
 
-#### Training
+#### Training and Evaluation
 
+Training
 ```
 python3 Retrieval.py --config "your/config/file" --checkpoint "your/checkpoint/file" --output_dir "/your.output/file" --pick_best_r1
+```
+
+Evaluate
+```
+python3 Retrieval.py --config "your/config/file" --checkpoint "your/checkpoint/file" --output_dir "/your.output/file" --evaluate
 ```
 
 ### Checkpoints
