@@ -25,8 +25,7 @@ from utils.mlm_tool import mlm, TextMaskingGenerator
 from dataset import create_dataset, create_sampler, create_loader, build_tokenizer
 from scheduler import create_scheduler
 from optim import create_optimizer
-from models.clip import clip
-
+from models.model_retrieval import CFACKCModel
 
 def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, config):
     model.train()
@@ -84,19 +83,12 @@ def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, co
             loss = loss / accumulate_steps
         # backward
         loss.backward()
-        #scaler.scale(loss).backward()
 
         if (i+1) % accumulate_steps == 0:
             #update
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad()
-
-            # scaler.unscale_(optimizer)
-            # torch.nn.utils.clip_grad_norm_(model.parameters(), config['max_norm'])
-            # scaler.step(optimizer)
-            # scaler.update()
-            # scheduler.step()
 
         metric_logger.update(loss_itm=loss_itm.item())
         metric_logger.update(loss_itc=loss_itc.item())
@@ -244,13 +236,7 @@ def main(args, config):
     cudnn.benchmark = True
 
     print(f"Creating model", flush=True)
-    if args.text2video:
-        print("Creating text2video model", flush=True)
-        from models.model_retrieval import XVLMForT2V
-        model = XVLMForT2V(config=config)
-    else:
-        from models.model_retrieval import XVLMForRetrieval
-        model = XVLMForRetrieval(config=config)
+    model = CFACKCModel(config=config)
 
     model.load_pretrained(args.checkpoint, config, is_eval=args.evaluate, use_mlm_loss=config["mlm"])
     model = model.to(device)
@@ -441,7 +427,6 @@ if __name__ == '__main__':
 
     parser.add_argument('--pick_best_r1', action='store_true', help="save best ckpt by r@1")
     parser.add_argument('--pick_best_t2v', action='store_true', help="save best ckpt by img recall")
-    parser.add_argument('--text2video', action='store_true', help="train a text2video retrieval model")
 
     args = parser.parse_args()
     

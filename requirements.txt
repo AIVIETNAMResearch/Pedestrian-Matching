@@ -4,8 +4,6 @@ ruamel_yaml
 opencv-python
 scikit-image
 matplotlib
-pycocotools
-pycocoevalcap
 datasets
 sentencepiece
 accelerate
