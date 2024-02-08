@@ -30,7 +30,7 @@ text_fusion_start_at: 12
 ## Training
 num_dec_layers: 6
 large_lr_for_dec: True
-batch_size_train: 32
+batch_size_train: 16
 accumulate_steps: 1
 batch_size_test_text: 256
 batch_size_test: 256
@@ -59,4 +59,4 @@ schedular: {sched: cosine, epochs: 31, num_warmup_steps: 0.1}
 eval_epoch: 3  # epoch index
 
 use_cnn_feats: True
-cnn_net: regnety_016
+cnn_net: convnext_base.fb_in22k_ft_in1k

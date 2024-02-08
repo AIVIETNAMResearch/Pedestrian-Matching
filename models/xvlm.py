@@ -23,7 +23,6 @@ from timm.models.layers import trunc_normal_
 from models import box_ops
 
 from models.xbert import BertConfig, BertForMaskedLM, BertModel
-from models.xroberta import RobertaForMaskedLM, RobertaModel, RobertaConfig
 import copy
 
 from utils import read_json
@@ -813,10 +812,10 @@ class XVLMBase(nn.Module):
         assert image_feat.size(-1) == self.embed_dim
         assert text_feat.size(-1) == self.embed_dim
 
-        #image_feat_all = allgather(image_feat, torch.distributed.get_rank(), torch.distributed.get_world_size())
-        #text_feat_all = allgather(text_feat, torch.distributed.get_rank(), torch.distributed.get_world_size())
-        image_feat_all = image_feat
-        text_feat_all = text_feat
+        image_feat_all = allgather(image_feat, torch.distributed.get_rank(), torch.distributed.get_world_size())
+        text_feat_all = allgather(text_feat, torch.distributed.get_rank(), torch.distributed.get_world_size())
+        # image_feat_all = image_feat
+        # text_feat_all = text_feat
         logits = image_feat_all @ text_feat_all.t() / self.temp
 
         bsz = image_feat_all.shape[0]
@@ -829,8 +828,8 @@ class XVLMBase(nn.Module):
         else:
             idx = idx.view(-1, 1)
             assert idx.size(0) == image_feat.size(0)
-            #idx_all = allgather(idx, torch.distributed.get_rank(), torch.distributed.get_world_size())
-            idx_all = idx
+            idx_all = allgather(idx, torch.distributed.get_rank(), torch.distributed.get_world_size())
+            # idx_all = idx
             pos_idx = torch.eq(idx_all, idx_all.t()).float()
             labels = pos_idx / pos_idx.sum(1, keepdim=True)
 

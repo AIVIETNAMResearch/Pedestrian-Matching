@@ -8,6 +8,7 @@ from dataset.retrieval_dataset import ps_eval_dataset, ps_train_dataset
 
 from dataset.randaugment import RandomAugment
 from dataset.random_erasing import RandomErasing
+from dataset.tokenizers import build_tokenizer
 
 import timm
 
@@ -16,9 +17,18 @@ def create_dataset(dataset, config, evaluate=False):
     normalize = transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
 
     train_transform_ps_weak = transforms.Compose([
+        # transforms.Resize((config['image_res'], config['image_res']), interpolation=InterpolationMode.BICUBIC),
+        # transforms.ToTensor(),
+        # normalize,
+
         transforms.Resize((config['image_res'], config['image_res']), interpolation=InterpolationMode.BICUBIC),
+        transforms.RandomHorizontalFlip(),
+        RandomAugment(2, 7, isPIL=True, augs=['Identity', 'AutoContrast', 'Equalize', 'Brightness', 'Sharpness',
+                                              'ShearX', 'ShearY', 'TranslateX', 'TranslateY', 'Rotate']),
+
         transforms.ToTensor(),
         normalize,
+        RandomErasing(probability=config['erasing_p'], mean=[0.0, 0.0, 0.0])
     ])
     # train_transform_ps_cnn = transforms.Compose([
     #     transforms.Resize((224, 224), interpolation=InterpolationMode.BICUBIC),

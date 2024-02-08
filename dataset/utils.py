@@ -11,9 +11,7 @@ import pickle
 import utils
 from tqdm import tqdm
 
-from utils.hdfs_io import hexists, hcopy, hopen
-from vqaTools.vqaEval import VQAEval
-from refTools.evaluation.refEvaluation import RefEvaluation
+from utils.hdfs_io import hcopy, hopen
 
 
 def sample_clip_ids(clips, mininum_frames: int, clip_captions=None, skip_caption_set=None):
@@ -452,35 +450,6 @@ def computeIoU(box1, box2):
     union = box1[2] * box1[3] + box2[2] * box2[3] - inter
     return float(inter) / union
 
-
-from pycocotools.coco import COCO
-from pycocoevalcap.eval import COCOEvalCap
-
-
-def coco_caption_eval(annotation_file, results_file):
-    assert os.path.exists(annotation_file)
-
-    # create coco object and coco_result object
-    coco = COCO(annotation_file)
-    coco_result = coco.loadRes(results_file)
-
-    # create coco_eval object by taking coco and coco_result
-    coco_eval = COCOEvalCap(coco, coco_result)
-
-    # evaluate on a subset of images by setting
-    # coco_eval.params['image_id'] = coco_result.getImgIds()
-    # please remove this line when evaluating the full validation set
-    # coco_eval.params['image_id'] = coco_result.getImgIds()
-
-    # evaluate results
-    # SPICE will take a few minutes the first time, but speeds up due to caching
-    coco_eval.evaluate()
-
-    # print output evaluation scores
-    for metric, score in coco_eval.eval.items():
-        print(f'{metric}: {score:.3f}', flush=True)
-
-    return coco_eval
 
 
 

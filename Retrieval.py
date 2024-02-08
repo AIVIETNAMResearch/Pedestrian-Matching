@@ -391,7 +391,7 @@ def main(args, config):
 
                         # torch.save(save_obj, os.path.join(args.output_dir, f'checkpoint_{epoch}.pth'))
 
-            #dist.barrier()
+            dist.barrier()
             torch.cuda.empty_cache()
 
         if utils.is_main_process():
@@ -418,6 +418,7 @@ if __name__ == '__main__':
     parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')    
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     parser.add_argument('--distributed', action='store_false')
+    parser.add_argument('--local-rank', type=int, required=False)
 
     parser.add_argument('--epoch', default=-1, type=int)
     parser.add_argument('--bs', default=-1, type=int, help="for each gpu, batch_size = bs // num_gpus")
