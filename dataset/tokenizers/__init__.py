@@ -1,4 +1,4 @@
-from transformers import BertTokenizer, RobertaTokenizer, XLMRobertaTokenizer, AutoTokenizer
+from transformers import BertTokenizerFast, RobertaTokenizer, XLMRobertaTokenizer, AutoTokenizer
 from dataset.tokenizers.bert_tokenizer_with_dropout import BertTokenizerWithDropout
 
 
@@ -7,7 +7,7 @@ def build_tokenizer(text_encoder: str, dropout=0):
         if dropout > 0:
             tokenizer = BertTokenizerWithDropout.from_pretrained(text_encoder, dropout=dropout)
         else:
-            tokenizer = BertTokenizer.from_pretrained(text_encoder)
+            tokenizer = BertTokenizerFast.from_pretrained(text_encoder)
 
     elif ('xlm-roberta-base' in text_encoder) or ('xlm-roberta-large' in text_encoder):
         tokenizer = XLMRobertaTokenizer.from_pretrained(text_encoder)

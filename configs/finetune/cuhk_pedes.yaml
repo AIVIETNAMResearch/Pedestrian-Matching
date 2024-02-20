@@ -30,10 +30,10 @@ text_fusion_start_at: 12
 ## Training
 num_dec_layers: 6
 large_lr_for_dec: True
-batch_size_train: 16
+batch_size_train: 18
 accumulate_steps: 1
-batch_size_test_text: 256
-batch_size_test: 256
+batch_size_test_text: 96
+batch_size_test: 96
 max_tokens: 40
 k_test: 128
 
@@ -50,13 +50,15 @@ max_masks: 12
 mask_whole_word: True
 skipgram_prb: 0.2
 skipgram_size: 3
+mask_type: 'default' # other options are 
 
 erasing_p: 0.6
+text_augment: 'wordnet'
 
 ## Other Settings
 optimizer: {opt: adamW, lr: 1e-5, weight_decay: 0.01, lr_mult: 2, vision_lr: 1e-5, text_lr: 1e-5}
 schedular: {sched: cosine, epochs: 31, num_warmup_steps: 0.1}
 eval_epoch: 3  # epoch index
 
-use_cnn_feats: True
+use_cnn_feats: False
 cnn_net: convnext_base.fb_in22k_ft_in1k

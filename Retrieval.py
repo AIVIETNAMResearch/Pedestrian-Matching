@@ -20,7 +20,7 @@ import torch.distributed as dist
 import utils
 from utils.checkpointer import Checkpointer
 from utils.hdfs_io import hmkdir
-from utils.mlm_tool import mlm, TextMaskingGenerator
+from utils.mlm_tool import mlm, TextMaskingGenerator, NounMaskingGenerator
 
 from dataset import create_dataset, create_sampler, create_loader, build_tokenizer
 from scheduler import create_scheduler
@@ -28,6 +28,8 @@ from optim import create_optimizer
 from models.model_retrieval import CFACKCModel
 
 def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, config):
+    print("DEVICE: ", device)
+
     model.train()
     
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -54,26 +56,31 @@ def train(model, data_loader, optimizer, tokenizer, epoch, device, scheduler, co
         
         #optimizer.zero_grad()
         if config["mlm"]:
+            if config["mask_type"] == "default":
                 mask_generator = TextMaskingGenerator(tokenizer, config['mask_prob'], config['max_masks'],
                                                     config['skipgram_prb'], config['skipgram_size'],
-                                                    config['mask_whole_word'])            
-                                                    
-                text_ids_masked, masked_pos, masked_ids = mlm(caption1, text_input1, tokenizer, device, mask_generator, config)
-                mlm_input = (text_ids_masked, masked_pos, masked_ids)
+                                                    config['mask_whole_word'])  
+            elif config["mask_type"] == "noun":
+                mask_generator = NounMaskingGenerator(tokenizer, config['mask_prob'], config['max_masks'])
+            else:
+                raise ValueError("mask_type should be either default or noun")          
+                                                
+            text_ids_masked, masked_pos, masked_ids = mlm(caption1, text_input1, tokenizer, device, mask_generator, config)
+            mlm_input = (text_ids_masked, masked_pos, masked_ids)
 
-                if config["use_id_loss"]:
-                    loss_itc, loss_itm, loss_id, loss_mlm = model(image1, image2, image_cnn, text_input1.input_ids, text_input1.attention_mask, 
-                                        text_input2.input_ids, text_input2.attention_mask, idx=idx, mlm_inputs=mlm_input)
-                    loss = loss_itc + loss_itm + loss_id + loss_mlm 
-                else:
-                    #text_input_clip = None
-                    #if config["use_clip_feats"]:
-                    #    text_input_clip = clip.tokenize(caption1, truncate=True).to(device)
+            if config["use_id_loss"]:
+                loss_itc, loss_itm, loss_id, loss_mlm = model(image1, image2, image_cnn, text_input1.input_ids, text_input1.attention_mask, 
+                                    text_input2.input_ids, text_input2.attention_mask, idx=idx, mlm_inputs=mlm_input)
+                loss = loss_itc + loss_itm + loss_id + loss_mlm 
+            else:
+                #text_input_clip = None
+                #if config["use_clip_feats"]:
+                #    text_input_clip = clip.tokenize(caption1, truncate=True).to(device)
 
-                    loss_itc, loss_itm, loss_mlm = model(image1, image2, image_cnn, text_input1.input_ids, text_input1.attention_mask, 
-                                            text_input2.input_ids, text_input2.attention_mask, idx=idx, mlm_inputs=mlm_input) 
-                                            #text_input_clip=text_input_clip, image_cnn=image_cnn)
-                    loss = loss_itc + loss_itm + loss_mlm
+                loss_itc, loss_itm, loss_mlm = model(image1, image2, image_cnn, text_input1.input_ids, text_input1.attention_mask, 
+                                        text_input2.input_ids, text_input2.attention_mask, idx=idx, mlm_inputs=mlm_input) 
+                                        #text_input_clip=text_input_clip, image_cnn=image_cnn)
+                loss = loss_itc + loss_itm + loss_mlm
         else:
             loss_itc, loss_itm = model(image1, image2, image_cnn, text_input1.input_ids, text_input1.attention_mask, 
                                     text_input2.input_ids, text_input2.attention_mask, idx=idx)
@@ -352,9 +359,7 @@ def main(args, config):
                     with open(os.path.join(args.output_dir, "log.txt"), "a") as f:
                         f.write(json.dumps(log_stats) + "\n")
 
-                    if args.text2video:
-                        score = test_result['img_r_mean']
-                    elif args.pick_best_r1:
+                    if args.pick_best_r1:
                         score = test_result['r1']
                     elif args.pick_best_t2v:
                         score = test_result['img_r_mean']
@@ -442,5 +447,5 @@ if __name__ == '__main__':
 
     if len(args.output_hdfs):
         hmkdir(args.output_hdfs)
-
+    os.environ['TORCH_USE_CUDA_DSA'] = "1"
     main(args, config)

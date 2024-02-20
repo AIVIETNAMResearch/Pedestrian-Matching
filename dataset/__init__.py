@@ -9,6 +9,7 @@ from dataset.retrieval_dataset import ps_eval_dataset, ps_train_dataset
 from dataset.randaugment import RandomAugment
 from dataset.random_erasing import RandomErasing
 from dataset.tokenizers import build_tokenizer
+from UniformAugment import UniformAugment
 
 import timm
 
@@ -23,12 +24,12 @@ def create_dataset(dataset, config, evaluate=False):
 
         transforms.Resize((config['image_res'], config['image_res']), interpolation=InterpolationMode.BICUBIC),
         transforms.RandomHorizontalFlip(),
-        RandomAugment(2, 7, isPIL=True, augs=['Identity', 'AutoContrast', 'Equalize', 'Brightness', 'Sharpness',
-                                              'ShearX', 'ShearY', 'TranslateX', 'TranslateY', 'Rotate']),
+        #RandomAugment(2, 7, isPIL=True, augs=['Identity', 'AutoContrast', 'Equalize', 'Brightness', 'Sharpness',
+        #                                      'ShearX', 'ShearY', 'TranslateX', 'TranslateY', 'Rotate']),
 
         transforms.ToTensor(),
         normalize,
-        RandomErasing(probability=config['erasing_p'], mean=[0.0, 0.0, 0.0])
+        #RandomErasing(probability=config['erasing_p'], mean=[0.0, 0.0, 0.0])
     ])
     # train_transform_ps_cnn = transforms.Compose([
     #     transforms.Resize((224, 224), interpolation=InterpolationMode.BICUBIC),
@@ -45,13 +46,13 @@ def create_dataset(dataset, config, evaluate=False):
     train_transform_ps_strong = transforms.Compose([
         transforms.Resize((config['image_res'], config['image_res']), interpolation=InterpolationMode.BICUBIC),
         transforms.RandomHorizontalFlip(),
-        RandomAugment(2, 7, isPIL=True, augs=['Identity', 'AutoContrast', 'Equalize', 'Brightness', 'Sharpness',
-                                              'ShearX', 'ShearY', 'TranslateX', 'TranslateY', 'Rotate']),
-
+        #RandomAugment(2, 7, isPIL=True, augs=['Identity', 'AutoContrast', 'Equalize', 'Brightness', 'Sharpness',
+        #                                      'ShearX', 'ShearY', 'TranslateX', 'TranslateY', 'Rotate']),
         transforms.ToTensor(),
         normalize,
         RandomErasing(probability=config['erasing_p'], mean=[0.0, 0.0, 0.0])
     ])
+    train_transform_ps_strong.transforms.insert(0, UniformAugment())
 
     test_transform = transforms.Compose([
         transforms.Resize((config['image_res'], config['image_res']), interpolation=InterpolationMode.BICUBIC),
@@ -65,35 +66,12 @@ def create_dataset(dataset, config, evaluate=False):
         if evaluate:
             return None, None, test_dataset
 
-        train_dataset = ps_train_dataset(config['train_file'], train_transform_ps_weak, train_transform_ps_strong, config['image_root'], config["max_tokens"], transform_cnn=train_transform_ps_cnn)
+        train_dataset = ps_train_dataset(config['train_file'], train_transform_ps_weak, train_transform_ps_strong, config['image_root'], config["max_tokens"], transform_cnn=train_transform_ps_cnn, text_augment=config['text_augment'])
         val_dataset = ps_eval_dataset(config['val_file'], test_transform, config['image_root'], config["max_tokens"])
 
         return train_dataset, val_dataset, test_dataset
     else:
         raise NotImplementedError(f"dataset == {dataset}")
-
-
-def vqa_collate_fn(batch):
-    image_list, question_list, answer_list, weight_list, n = [], [], [], [], []
-    for image, question, answer, weights in batch:
-        image_list.append(image)
-        question_list.append(question)
-        weight_list += weights       
-        answer_list += answer
-        n.append(len(answer))
-    return torch.stack(image_list, dim=0), question_list, answer_list, torch.Tensor(weight_list), n
-
-
-def vqa_classify_collate_fn(batch):
-    image_list, question_list, answer_list, weight_list, n = [], [], [], [], []
-    for image, question, answer, weights, _ in batch:
-        image_list.append(image)
-        question_list.append(question)
-        weight_list += weights       
-        answer_list += answer
-        n.append(len(answer))
-    return torch.stack(image_list, dim=0), question_list, torch.Tensor(answer_list), torch.Tensor(weight_list), n
-
 
 def create_sampler(datasets, shuffles, num_tasks, global_rank):
     samplers = []
@@ -129,16 +107,3 @@ def create_loader(datasets, samplers, batch_size, num_workers, is_trains, collat
         print(f"### be careful: func create_loader returns a list length of {len(loaders)}")
 
     return loaders
-
-def vqa_mc_collate_fn(batch):
-    image_list, question_list, answer_list = [], [], []
-    cand_list = [ [], [], [], [], [] ]
-    for image, question, answer, cand_ in batch:
-        image_list.append(image)
-        question_list.append(question)     
-        answer_list.append(int(answer))
-        # cand_list += cand_
-        # print(cand_)
-        for i in range(5):
-            cand_list[i].append(cand_[i])
-    return torch.stack(image_list, dim=0), question_list, torch.Tensor(answer_list), cand_list

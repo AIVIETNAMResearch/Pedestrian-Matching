@@ -208,7 +208,6 @@ class CFACKCModel(XVLMBase):
         #loss_itm = (loss_itm_1 + loss_itm_2) / 2
         if mlm_inputs is not None:
             text_ids_masked, masked_pos, masked_ids = mlm_inputs
-
             loss_mlm = self.get_mlm_loss(text_ids_masked, text1_atts, image_embeds_1, image_atts_1, masked_pos, masked_ids)
             if self.config["use_id_loss"]:
                 image1_logits = self.classifier(image_feat_1)

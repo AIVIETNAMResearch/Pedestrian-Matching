@@ -3,6 +3,11 @@
 
 import random
 from random import shuffle
+from textaugment import Word2vec, Wordnet
+import nltk
+
+nltk.download('punkt')
+nltk.download('wordnet')
 
 random.seed(1)
 
@@ -229,4 +234,23 @@ def eda(sentence, alpha_sr=0.1, alpha_ri=0.1, alpha_rs=0.1, p_rd=0.1, num_aug=9)
     # append the original sentence
     augmented_sentences.append(sentence)
 
+    return augmented_sentences
+
+
+def text_augment(text, num_aug=9, aug_method="eda"):
+    
+    
+    if aug_method == "eda":
+        augmented_sentences = eda(text, num_aug=num_aug)
+    elif aug_method == "wordnet":
+        t = Wordnet(v=True, n=True, p=0.5)
+        augmented_sentences = []
+        for _ in range(num_aug):
+            augmented_sentences.append(t.augment(text, top_n=10))
+    elif aug_method == "word2vec":
+        t = Word2vec()
+        augmented_sentences = []
+        for _ in range(num_aug):
+            augmented_sentences.append(t.augment(text, top_n=10))
+    
     return augmented_sentences
