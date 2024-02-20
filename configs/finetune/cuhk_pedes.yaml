@@ -53,7 +53,7 @@ skipgram_size: 3
 mask_type: 'default' # other options are 
 
 erasing_p: 0.6
-text_augment: 'wordnet'
+text_augment: 'backtranslate'
 
 ## Other Settings
 optimizer: {opt: adamW, lr: 1e-5, weight_decay: 0.01, lr_mult: 2, vision_lr: 1e-5, text_lr: 1e-5}

@@ -4,6 +4,7 @@
 import random
 from random import shuffle
 from textaugment import Word2vec, Wordnet
+from googletrans import Translator
 import nltk
 
 nltk.download('punkt')
@@ -252,5 +253,10 @@ def text_augment(text, num_aug=9, aug_method="eda"):
         augmented_sentences = []
         for _ in range(num_aug):
             augmented_sentences.append(t.augment(text, top_n=10))
+    elif aug_method == "backtranslate":
+        t = Translator()
+        text_translated = t.translate(text, dest='fr').text
+        augment_text = t.translate(text_translated, dest='en').text
+        augmented_sentences = [augment_text] * num_aug
     
     return augmented_sentences
